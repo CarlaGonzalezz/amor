@@ -76,9 +76,6 @@
       height: 1em;
       vertical-align: bottom;
     }
-    @keyframes blink {
-      50% { background: transparent; }
-    }
     .question {
       position: absolute;
       inset: auto 16px 16px 16px;
@@ -87,6 +84,7 @@
       border-radius: 6px;
       padding: 14px;
       display: none;
+      z-index: 2;
     }
     .question h2 {
       margin: 0 0 8px;
@@ -94,7 +92,6 @@
       color: var(--accent);
     }
     .btns {
-      position: relative;
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
@@ -110,6 +107,7 @@
       cursor: pointer;
       transition: transform .06s ease, background .2s ease;
       position: relative;
+      z-index: 3;
     }
     button:hover { background: rgba(0,255,0,0.08); transform: translateY(-1px); }
     #noBtn { border-color: var(--danger); color: var(--danger); }
@@ -117,7 +115,7 @@
       position: absolute;
       inset: 0;
       display: none;
-      z-index: 2;
+      z-index: 1;
       pointer-events: none;
     }
     .toast {
@@ -130,7 +128,7 @@
       border-radius: 4px;
       font-size: 14px;
       display: none;
-      z-index: 3;
+      z-index: 4;
     }
     .heart {
       position: absolute;
@@ -150,6 +148,7 @@
       font-size: 12px;
       opacity: 0.7;
       user-select: none;
+      z-index: 1;
     }
     .kbd {
       padding: 2px 6px;
@@ -158,6 +157,53 @@
       font-size: 12px;
       margin: 0 2px;
       display: inline-block;
+    }
+    /* Shake effect for the terminal */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-8px); }
+      40% { transform: translateX(8px); }
+      60% { transform: translateX(-6px); }
+      80% { transform: translateX(6px); }
+    }
+    .shake { animation: shake 0.6s ease; }
+
+    /* Center overlay for "No" message */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.72);
+      z-index: 10; /* above question and buttons */
+      backdrop-filter: blur(2px);
+    }
+    .overlay .box {
+      border: 1px solid var(--muted);
+      background: rgba(1, 20, 1, 0.9);
+      padding: 16px 20px;
+      border-radius: 8px;
+      text-align: center;
+      max-width: 90%;
+      box-shadow: 0 0 20px rgba(0,255,0,0.15);
+      animation: pop .18s ease-out;
+    }
+    @keyframes pop {
+      from { transform: scale(.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .overlay .title {
+      font-size: clamp(18px, 3.2vw, 28px);
+      color: var(--accent);
+    }
+    .overlay .close {
+      margin-top: 10px;
+      border: 1px solid var(--muted);
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
     }
   </style>
 </head>
@@ -168,17 +214,30 @@
       <pre id="output"></pre><span class="cursor"></span>
       <div class="question" id="question">
         <h2>¿Te querés comprometer conmigo?</h2>
-        <div class="btns">
+        <div class="btns" id="btns">
           <button id="yesBtn">Sí, obvio 💍</button>
           <button id="noBtn">No 😅</button>
         </div>
       </div>
+
+      <!-- Centered overlay for "No" -->
+      <div class="overlay" id="noOverlay" aria-modal="true" role="dialog" aria-labelledby="noTitle">
+        <div class="box">
+          <div class="title" id="noTitle">¡Andá a cagar! 😡</div>
+          <button class="close" id="closeOverlay" aria-label="Cerrar">Ok 😅</button>
+        </div>
+      </div>
+
       <canvas id="confetti"></canvas>
       <div class="footer">Amor v1.0 • © Nosotrxs</div>
     </div>
   </div>
 
   <script>
+    // ---- Config rápidos ----
+    const NO_MAX_ESCAPES = 2;               // cuántas veces "huye" el botón No
+    const NO_OVERLAY_AUTOHIDE_MS = 4500;    // 0 = no se cierra solo; si >0, se cierra tras ese tiempo
+
     // ---- Typing effect & script ----
     const output = document.getElementById('output');
     const question = document.getElementById('question');
@@ -245,25 +304,105 @@
     })();
 
     // ---- Buttons behavior ----
+    const btns = document.getElementById('btns');
     const yesBtn = document.getElementById('yesBtn');
     const noBtn = document.getElementById('noBtn');
 
-    // Make "No" run away
-    noBtn.addEventListener('mouseenter', () => {
+    yesBtn.addEventListener('click', () => {
+      // Ocultamos "No" por completo y la pregunta
+      noBtn.style.display = 'none';
+      question.style.display = 'none';
+      celebrate();
+      output.textContent += '\\n>> Confirmación: ¡Dijo que SÍ!\\n';
+    });
+
+    // Make "No" run away only a couple of times, then allow click
+    let noEscapes = 0;
+
+    function moveNo() {
+      if (!noBtn.dataset.freed) {
+        const rectBefore = noBtn.getBoundingClientRect();
+        terminal.appendChild(noBtn);                 // re-parent to terminal for absolute positioning
+        noBtn.dataset.freed = "1";
+        noBtn.style.width = rectBefore.width + 'px'; // preserve size
+      }
       const rect = terminal.getBoundingClientRect();
-      const bRect = noBtn.getBoundingClientRect();
-      const pad = 20;
-      const x = Math.random() * (rect.width - bRect.width - pad*2) + pad;
-      const y = Math.random() * (rect.height - bRect.height - 160) + 80;
+      const btnRect = noBtn.getBoundingClientRect();
+      const pad = 16;
+      const maxX = rect.width - btnRect.width - pad;
+      const maxY = rect.height - btnRect.height - pad;
+      const x = Math.max(pad, Math.min(maxX, Math.random() * maxX));
+      const y = Math.max(pad + 48, Math.min(maxY - 48, Math.random() * maxY));
       noBtn.style.position = 'absolute';
       noBtn.style.left = x + 'px';
       noBtn.style.top = y + 'px';
+      noBtn.style.zIndex = 6;
+    }
+
+    noBtn.addEventListener('mouseenter', () => {
+      if (noEscapes < NO_MAX_ESCAPES) {
+        noEscapes++;
+        moveNo();
+      }
+    });
+    noBtn.addEventListener('touchstart', (e) => {
+      if (noEscapes < NO_MAX_ESCAPES) {
+        e.preventDefault();
+        noEscapes++;
+        moveNo();
+      }
+    }, { passive: false });
+
+    // ---- Centered overlay on "No" click ----
+    const noOverlay = document.getElementById('noOverlay');
+    const closeOverlay = document.getElementById('closeOverlay');
+    let overlayTimer = null;
+
+    function restoreNoHome() {
+      // Volver "No" a su contenedor original junto a "Sí"
+      btns.appendChild(noBtn);
+      noBtn.style.position = '';
+      noBtn.style.left = '';
+      noBtn.style.top = '';
+      noBtn.style.width = '';
+      noBtn.style.zIndex = '';
+      delete noBtn.dataset.freed;
+      // Dejar de escapar a partir de ahora
+      noEscapes = NO_MAX_ESCAPES;
+      // Asegurar que se vea por si lo habían ocultado
+      noBtn.style.display = '';
+    }
+
+    function showNoOverlay() {
+      noOverlay.style.display = 'grid';
+      terminal.classList.add('shake');
+      setTimeout(() => terminal.classList.remove('shake'), 700);
+      if (NO_OVERLAY_AUTOHIDE_MS > 0) {
+        overlayTimer = setTimeout(() => hideNoOverlay(true), NO_OVERLAY_AUTOHIDE_MS);
+      }
+    }
+    function hideNoOverlay(restore = false) {
+      noOverlay.style.display = 'none';
+      if (overlayTimer) {
+        clearTimeout(overlayTimer);
+        overlayTimer = null;
+      }
+      if (restore) restoreNoHome();
+    }
+    closeOverlay.addEventListener('click', () => {
+      hideNoOverlay(true); // al cerrar con OK, restaurar a su lugar
+    });
+    noOverlay.addEventListener('click', (e) => {
+      if (e.target === noOverlay) hideNoOverlay(true); // click afuera también restaura
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && noOverlay.style.display === 'grid') hideNoOverlay(true);
     });
 
-    yesBtn.addEventListener('click', () => {
-      celebrate();
-      output.textContent += '\\n>> Confirmación: ¡Dijo que SÍ!\\n';
-      question.style.display = 'none';
+    noBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      output.textContent += '\\n>> Respuesta: “No” (humor activado)\\n';
+      showNoOverlay();
     });
 
     // ---- Confetti + hearts ----
@@ -298,7 +437,7 @@
         });
         t += 1;
         animId = requestAnimationFrame(animate);
-        if (t > 60 * 6) { // ~6 seconds
+        if (t > 60 * 6) {
           cancelAnimationFrame(animId);
           canvas.style.display = 'none';
           particles = [];
@@ -365,7 +504,7 @@
       msg.style.placeItems = 'center';
       msg.style.background = 'rgba(0,0,0,0.6)';
       msg.style.backdropFilter = 'blur(2px)';
-      msg.style.zIndex = 2;
+      msg.style.zIndex = 8;
       msg.innerHTML = `
         <div style="text-align:center">
           <div style="font-size:48px; line-height:1">❤</div>
@@ -386,9 +525,7 @@
     });
 
     // ---- Quick customization (edit here) ----
-    // Cambiá el texto de la pregunta si querés:
     // document.querySelector('#question h2').textContent = "¿Querés casarte conmigo?";
-    // Cambiá el título en la pestaña:
     // document.title = "/* Compilando... Nosotros v2 */";
   </script>
 </body>
