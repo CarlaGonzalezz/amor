@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>/* Compilando... Amor v1.0 */</title>
+  <style>
+    :root {
+      --bg: #0b0f0a;
+      --fg: #9eff9e;
+      --muted: #58d658;
+      --accent: #c3ffb8;
+      --danger: #ff6b6b;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Courier New", Courier, monospace;
+    }
+    .screen {
+      box-sizing: border-box;
+      height: 100%;
+      padding: clamp(16px, 4vw, 40px);
+      display: grid;
+      place-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .terminal {
+      width: min(900px, 100%);
+      height: min(580px, 80vh);
+      border: 2px solid var(--muted);
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+      background: #030603;
+      box-shadow: 0 0 20px #0f1, inset 0 0 35px rgba(0,255,0,0.08);
+      border-radius: 6px;
+      isolation: isolate;
+    }
+    /* CRT scanlines and glow */
+    .terminal::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0px,
+        rgba(0, 0, 0, 0) 2px,
+        rgba(0, 0, 0, 0.2) 3px
+      );
+      pointer-events: none;
+      mix-blend-mode: multiply;
+      opacity: 0.6;
+      animation: flicker 3s infinite;
+    }
+    @keyframes flicker {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 0.75; }
+    }
+    #output {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.4;
+      height: 100%;
+      overflow: auto;
+      padding-right: 8px;
+    }
+    .cursor {
+      display: inline-block;
+      width: 10px;
+      background: var(--fg);
+      margin-left: 2px;
+      animation: blink 1s step-end infinite;
+      height: 1em;
+      vertical-align: bottom;
+    }
+    @keyframes blink {
+      50% { background: transparent; }
+    }
+    .question {
+      position: absolute;
+      inset: auto 16px 16px 16px;
+      background: rgba(1, 20, 1, 0.9);
+      border: 1px solid var(--muted);
+      border-radius: 6px;
+      padding: 14px;
+      display: none;
+    }
+    .question h2 {
+      margin: 0 0 8px;
+      font-size: clamp(18px, 3vw, 24px);
+      color: var(--accent);
+    }
+    .btns {
+      position: relative;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--muted);
+      padding: 10px 16px;
+      font-family: inherit;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: transform .06s ease, background .2s ease;
+      position: relative;
+    }
+    button:hover { background: rgba(0,255,0,0.08); transform: translateY(-1px); }
+    #noBtn { border-color: var(--danger); color: var(--danger); }
+    #confetti {
+      position: absolute;
+      inset: 0;
+      display: none;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .toast {
+      position: absolute;
+      top: 12px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--muted);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      display: none;
+      z-index: 3;
+    }
+    .heart {
+      position: absolute;
+      font-size: 18px;
+      opacity: 0;
+      animation: float 2.2s ease-in forwards;
+    }
+    @keyframes float {
+      0% { transform: translateY(0) scale(0.9); opacity: 0; }
+      10% { opacity: 1; }
+      100% { transform: translateY(-140px) scale(1.4); opacity: 0; }
+    }
+    .footer {
+      position: absolute;
+      bottom: 8px;
+      right: 12px;
+      font-size: 12px;
+      opacity: 0.7;
+      user-select: none;
+    }
+    .kbd {
+      padding: 2px 6px;
+      border: 1px solid var(--muted);
+      border-radius: 4px;
+      font-size: 12px;
+      margin: 0 2px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="terminal" id="terminal">
+      <div class="toast" id="toast">Tip: probá el <span class="kbd">↑ ↑ ↓ ↓ ← → ← → B A</span></div>
+      <pre id="output"></pre><span class="cursor"></span>
+      <div class="question" id="question">
+        <h2>¿Te querés comprometer conmigo?</h2>
+        <div class="btns">
+          <button id="yesBtn">Sí, obvio 💍</button>
+          <button id="noBtn">No 😅</button>
+        </div>
+      </div>
+      <canvas id="confetti"></canvas>
+      <div class="footer">Amor v1.0 • © Nosotrxs</div>
+    </div>
+  </div>
+
+  <script>
+    // ---- Typing effect & script ----
+    const output = document.getElementById('output');
+    const question = document.getElementById('question');
+    const toast = document.getElementById('toast');
+    const terminal = document.getElementById('terminal');
+
+    const lines = [
+      'Bootloader iniciado...',
+      'Cargando módulos: ❤️  confianza, 💬 comunicación, 🤝 trabajo en equipo... OK',
+      'Verificando compatibilidad... 100%',
+      'Compilando proyecto "Nosotrxs" (release)...',
+      '[#####-----] 50%',
+      '[##########] 100%',
+      'Ejecutando pruebas automatizadas de amor...',
+      ' - Test 1: ¿Nos elegimos todos los días?  ✅',
+      ' - Test 2: ¿Superamos bugs juntxs?       ✅',
+      ' - Test 3: ¿Hay team para toda la vida?  ✅',
+      '',
+      'Resultado: Todas las pruebas PASARON.',
+      '',
+      'Desbloqueando pregunta principal...'
+    ];
+
+    function typeLines(lines, i = 0) {
+      if (i >= lines.length) {
+        setTimeout(() => question.style.display = 'block', 800);
+        setTimeout(() => toast.style.display = 'block', 1400);
+        return;
+      }
+      typeText(lines[i] + '\\n', 0, () => {
+        setTimeout(() => typeLines(lines, i + 1), 200);
+      });
+    }
+
+    function typeText(text, i, cb) {
+      if (i < text.length) {
+        output.textContent += text.charAt(i);
+        output.scrollTop = output.scrollHeight;
+        setTimeout(() => typeText(text, i + 1, cb), 15 + Math.random()*30);
+      } else { cb && cb(); }
+    }
+
+    // Start typing
+    setTimeout(() => typeLines(lines), 600);
+
+    // ---- Easter egg: Konami code to jump to the question ----
+    (function konami() {
+      const seq = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+      let pos = 0;
+      window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        if (key === seq[pos].toLowerCase()) {
+          pos++;
+          if (pos === seq.length) {
+            question.style.display = 'block';
+            toast.textContent = '¡Modo pro activado!';
+            toast.style.display = 'block';
+            pos = 0;
+          }
+        } else {
+          pos = 0;
+        }
+      });
+    })();
+
+    // ---- Buttons behavior ----
+    const yesBtn = document.getElementById('yesBtn');
+    const noBtn = document.getElementById('noBtn');
+
+    // Make "No" run away
+    noBtn.addEventListener('mouseenter', () => {
+      const rect = terminal.getBoundingClientRect();
+      const bRect = noBtn.getBoundingClientRect();
+      const pad = 20;
+      const x = Math.random() * (rect.width - bRect.width - pad*2) + pad;
+      const y = Math.random() * (rect.height - bRect.height - 160) + 80;
+      noBtn.style.position = 'absolute';
+      noBtn.style.left = x + 'px';
+      noBtn.style.top = y + 'px';
+    });
+
+    yesBtn.addEventListener('click', () => {
+      celebrate();
+      output.textContent += '\\n>> Confirmación: ¡Dijo que SÍ!\\n';
+      question.style.display = 'none';
+    });
+
+    // ---- Confetti + hearts ----
+    const canvas = document.getElementById('confetti');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    let animId;
+
+    function resizeCanvas() {
+      canvas.width = terminal.clientWidth;
+      canvas.height = terminal.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function celebrate() {
+      canvas.style.display = 'block';
+      spawnHearts();
+      createConfetti();
+      let t = 0;
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach(p => {
+          p.y += p.vy;
+          p.x += p.vx;
+          p.vy += 0.05;
+          p.r += p.spin;
+          if (p.y > canvas.height + 10) {
+            p.y = -10; p.x = Math.random()*canvas.width; p.vy = Math.random()*2 + 1;
+          }
+          drawParticle(p);
+        });
+        t += 1;
+        animId = requestAnimationFrame(animate);
+        if (t > 60 * 6) { // ~6 seconds
+          cancelAnimationFrame(animId);
+          canvas.style.display = 'none';
+          particles = [];
+          showHeartsMessage();
+        }
+      }
+      animate();
+    }
+
+    function createConfetti() {
+      particles = [];
+      const colors = ['#9eff9e','#58d658','#c3ffb8','#c2ffc2','#e2ffe2'];
+      const count = Math.max(100, Math.floor((canvas.width * canvas.height) / 12000));
+      for (let i=0; i<count; i++) {
+        particles.push({
+          x: Math.random()*canvas.width,
+          y: Math.random()*canvas.height - canvas.height,
+          vx: (Math.random()-0.5)*1.2,
+          vy: Math.random()*2 + 1,
+          size: Math.random()*6 + 3,
+          r: Math.random()*Math.PI,
+          spin: (Math.random()-0.5)*0.1,
+          color: colors[Math.floor(Math.random()*colors.length)],
+          shape: Math.random() < 0.5 ? 'rect' : 'circle'
+        });
+      }
+    }
+
+    function drawParticle(p) {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.r);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'rect') {
+        ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size*0.6);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size/2, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Floating hearts as DOM elements
+    function spawnHearts() {
+      const emojis = ['❤','💚','💖','💍','🥂','✨'];
+      for (let i=0; i<18; i++) {
+        const el = document.createElement('div');
+        el.className = 'heart';
+        el.textContent = emojis[i % emojis.length];
+        el.style.left = Math.random()*90 + '%';
+        el.style.bottom = '10px';
+        el.style.animationDelay = (Math.random()*1.2)+'s';
+        terminal.appendChild(el);
+        setTimeout(()=> el.remove(), 2600);
+      }
+    }
+
+    function showHeartsMessage() {
+      const msg = document.createElement('div');
+      msg.style.position = 'absolute';
+      msg.style.inset = '0';
+      msg.style.display = 'grid';
+      msg.style.placeItems = 'center';
+      msg.style.background = 'rgba(0,0,0,0.6)';
+      msg.style.backdropFilter = 'blur(2px)';
+      msg.style.zIndex = 2;
+      msg.innerHTML = `
+        <div style="text-align:center">
+          <div style="font-size:48px; line-height:1">❤</div>
+          <div style="font-size:clamp(20px,3.2vw,32px); margin-top:8px; color:var(--accent)">
+            ¡Dijo que SÍ!
+          </div>
+          <div style="margin-top:6px; font-size:14px; opacity:.8">Ahora somos versión 2.0 💍</div>
+        </div>`;
+      terminal.appendChild(msg);
+      spawnHearts();
+    }
+
+    // Accessibility: focus on Yes with Enter
+    window.addEventListener('keydown', (e) => {
+      if (question.style.display === 'block' && e.key === 'Enter') {
+        yesBtn.focus();
+      }
+    });
+
+    // ---- Quick customization (edit here) ----
+    // Cambiá el texto de la pregunta si querés:
+    // document.querySelector('#question h2').textContent = "¿Querés casarte conmigo?";
+    // Cambiá el título en la pestaña:
+    // document.title = "/* Compilando... Nosotros v2 */";
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: propuesta-retro
+    env: static
+    buildCommand: ""
+    staticPublishPath: .
